@@ -61,33 +61,43 @@ class YfinanceFetcher(BaseFetcher):
         """
         转换股票代码为 Yahoo Finance 格式
         
-        Yahoo Finance A 股代码格式：
+        Yahoo Finance 代码格式：
         - 沪市：600519.SS (Shanghai Stock Exchange)
         - 深市：000001.SZ (Shenzhen Stock Exchange)
+        - 美股：AAPL, MSFT, GOOGL (直接使用字母代码)
+        - 港股：00700.HK (Hong Kong)
         
         Args:
-            stock_code: 原始代码，如 '600519', '000001'
+            stock_code: 原始代码，如 '600519', 'AAPL', '00700'
             
         Returns:
-            Yahoo Finance 格式代码，如 '600519.SS', '000001.SZ'
+            Yahoo Finance 格式代码
         """
-        code = stock_code.strip()
+        code = stock_code.strip().upper()
         
-        # 已经包含后缀的情况
-        if '.SS' in code.upper() or '.SZ' in code.upper():
-            return code.upper()
+        # 已经包含Yahoo Finance后缀的情况
+        if any(suffix in code for suffix in ['.SS', '.SZ', '.HK', '.US', '.NYSE', '.NASDAQ']):
+            return code
         
-        # 去除可能的后缀
-        code = code.replace('.SH', '').replace('.sh', '')
+        # 去除可能的其他后缀
+        code = code.replace('.SH', '').replace('.US', '')
         
-        # 根据代码前缀判断市场
+        # 美股：字母代码，直接返回
+        if code.isalpha():
+            return code
+        
+        # 港股：5位数字，添加.HK
+        if code.isdigit() and len(code) == 5:
+            return f"{code}.HK"
+        
+        # A股：根据代码前缀判断市场
         if code.startswith(('600', '601', '603', '688')):
             return f"{code}.SS"
         elif code.startswith(('000', '002', '300')):
             return f"{code}.SZ"
         else:
-            logger.warning(f"无法确定股票 {code} 的市场，默认使用深市")
-            return f"{code}.SZ"
+            logger.warning(f"无法确定股票 {code} 的市场，直接返回原始代码")
+            return code
     
     @retry(
         stop=stop_after_attempt(3),

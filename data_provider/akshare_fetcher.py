@@ -214,6 +214,28 @@ def _is_etf_code(stock_code: str) -> bool:
     return stock_code.startswith(etf_prefixes) and len(stock_code) == 6
 
 
+def _is_us_stock_code(stock_code: str) -> bool:
+    """
+    判断代码是否为美股
+    
+    美股代码规则：
+    - 字母代码，如 'AAPL', 'MSFT', 'GOOGL'
+    - 部分代码可能带有后缀，如 'TSLA.US', 'AMZN'
+    - 长度通常为1-5个字母
+    
+    Args:
+        stock_code: 股票代码
+        
+    Returns:
+        True 表示是美股代码，False 表示不是美股代码
+    """
+    # 去除可能的后缀
+    code = stock_code.upper().replace('.US', '')
+    
+    # 美股代码通常是字母，长度1-5
+    return code.isalpha() and 1 <= len(code) <= 5
+
+
 def _is_hk_code(stock_code: str) -> bool:
     """
     判断代码是否为港股
@@ -310,18 +332,23 @@ class AkshareFetcher(BaseFetcher):
         从 Akshare 获取原始数据
         
         根据代码类型自动选择 API：
-        - 普通股票：使用 ak.stock_zh_a_hist()
+        - 普通A股：使用 ak.stock_zh_a_hist()
         - ETF 基金：使用 ak.fund_etf_hist_em()
+        - 港股：使用 ak.stock_hk_hist()
+        - 美股：akshare不支持，抛出异常让DataFetcherManager切换到YfinanceFetcher
         
         流程：
-        1. 判断代码类型（股票/ETF）
+        1. 判断代码类型（股票/ETF/港股/美股）
         2. 设置随机 User-Agent
         3. 执行速率限制（随机休眠）
         4. 调用对应的 akshare API
         5. 处理返回数据
         """
         # 根据代码类型选择不同的获取方法
-        if _is_hk_code(stock_code):
+        if _is_us_stock_code(stock_code):
+            # akshare 不支持美股，抛出异常让 DataFetcherManager 切换到 YfinanceFetcher
+            raise DataFetchError(f"Akshare 不支持美股 {stock_code}，请使用 YfinanceFetcher")
+        elif _is_hk_code(stock_code):
             return self._fetch_hk_data(stock_code, start_date, end_date)
         elif _is_etf_code(stock_code):
             return self._fetch_etf_data(stock_code, start_date, end_date)
@@ -550,8 +577,10 @@ class AkshareFetcher(BaseFetcher):
         获取实时行情数据
         
         根据代码类型自动选择数据源：
-        - 普通股票：ak.stock_zh_a_spot_em()
+        - A股：ak.stock_zh_a_spot_em()
         - ETF 基金：ak.fund_etf_spot_em()
+        - 港股：ak.stock_hk_spot_em()
+        - 美股：akshare不支持，返回None
         
         Args:
             stock_code: 股票/ETF代码
@@ -560,7 +589,11 @@ class AkshareFetcher(BaseFetcher):
             RealtimeQuote 对象，获取失败返回 None
         """
         # 根据代码类型选择不同的获取方法
-        if _is_hk_code(stock_code):
+        if _is_us_stock_code(stock_code):
+            # akshare 不支持美股实时行情
+            logger.warning(f"Akshare 不支持美股 {stock_code} 的实时行情")
+            return None
+        elif _is_hk_code(stock_code):
             return self._get_hk_realtime_quote(stock_code)
         elif _is_etf_code(stock_code):
             return self._get_etf_realtime_quote(stock_code)
@@ -812,7 +845,7 @@ class AkshareFetcher(BaseFetcher):
         数据来源：ak.stock_cyq_em()
         包含：获利比例、平均成本、筹码集中度
         
-        注意：ETF/指数没有筹码分布数据，会直接返回 None
+        注意：ETF/指数/美股没有筹码分布数据，会直接返回 None
         
         Args:
             stock_code: 股票代码
@@ -823,8 +856,8 @@ class AkshareFetcher(BaseFetcher):
         import akshare as ak
         
         # ETF/指数没有筹码分布数据
-        if _is_etf_code(stock_code):
-            logger.debug(f"[API跳过] {stock_code} 是 ETF/指数，无筹码分布数据")
+        if _is_etf_code(stock_code) or _is_us_stock_code(stock_code):
+            logger.debug(f"[API跳过] {stock_code} 是 ETF/指数/美股，无筹码分布数据")
             return None
         
         try:
